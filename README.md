@@ -1,4 +1,4 @@
-# Módulo Terraform para VPC Padrão da ForceOne-AWS
+# Módulo Terraform para criação VPC - Disciplina IAC Puc MG
 
 Este repositório contém o módulo Terraform padrão para criação da nossa arquitetura de VPC na AWS. Ele é flexível e permite a criação condicional de diferentes camadas de rede.
 
@@ -11,7 +11,7 @@ Este repositório contém o módulo Terraform padrão para criação da nossa ar
 
 1.  Clone este repositório:
     ```bash
-    git clone [https://github.com/ForceOne-AWS/terraform-aws-vpc.git](https://github.com/ForceOne-AWS/terraform-aws-vpc.git)
+    git clone [https://github.com/erickdavi/lab-terraform-aula-douglas.git](https://github.com/erickdavi/lab-terraform-aula-douglas.git)
     ```
 2.  Navegue até a pasta do projeto:
     ```bash
