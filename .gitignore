@@ -1,0 +1,26 @@
+# Arquivos de estado local do Terraform - NUNCA SUBIR!
+*.tfstate
+*.tfstate.*
+
+# Logs de erro
+crash.log
+crash.*.log
+
+# Arquivos de variáveis que podem conter segredos - BOA PRÁTICA NÃO SUBIR
+*.tfvars
+*.tfvars.json
+
+# Pasta do Terraform com binários dos providers e módulos
+.terraform/
+
+# Arquivo de lock de dependências. É debatido, mas geralmente é seguro subir.
+# Vamos ignorá-lo por enquanto para simplificar. Se sua equipe decidir versioná-lo,
+# basta remover a linha abaixo.
+.terraform.lock.hcl
+
+# Arquivos de plano do Terraform - Podem conter informações sensíveis
+*.tfplan
+
+# Outros arquivos de sistema operacional
+.DS_Store
+Thumbs.db

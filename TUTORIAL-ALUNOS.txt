@@ -1,0 +1,495 @@
+================================================================================
+  TUTORIAL COMPLETO — TERRAFORM NA AWS
+  Projeto: projeto-aula-5 | Região: us-east-1 (N. Virginia)
+================================================================================
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PARTE 1 — O QUE É TERRAFORM?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Terraform é uma ferramenta de "Infraestrutura como Código" (IaC) criada pela
+HashiCorp. Em vez de clicar em menus no Console da AWS, você ESCREVE em arquivos
+de texto (.tf) exatamente quais recursos deseja criar — e o Terraform se
+encarrega de criar, modificar ou destruir esses recursos de forma automática e
+reproduzível.
+
+--- Por que isso importa? ---
+
+  ANTES do IaC:
+    - Um engenheiro clicava manualmente no Console AWS
+    - Ninguém sabia exatamente o que havia sido criado
+    - Recriar o ambiente em outro lugar levava dias
+    - Erros humanos eram frequentes
+
+  COM o Terraform:
+    - A infraestrutura vira código versionado no Git
+    - Qualquer pessoa pode ver EXATAMENTE o que existe
+    - Recriar o ambiente inteiro demora minutos
+    - O Terraform impede configurações inconsistentes
+
+--- Como o Terraform pensa? ---
+
+O Terraform trabalha com três etapas fundamentais:
+
+  1. WRITE   → Você escreve os arquivos .tf descrevendo o que quer
+  2. PLAN    → O Terraform calcula o que precisa criar/modificar/destruir
+  3. APPLY   → O Terraform executa as mudanças na nuvem
+
+E mantém um arquivo chamado "terraform.tfstate" que registra tudo que ele
+já criou. Esse arquivo é a "memória" do Terraform — nunca o apague.
+
+--- Conceitos essenciais ---
+
+  PROVIDER:   Plugin que conecta o Terraform a um serviço (ex: AWS, Azure)
+  RESOURCE:   Um recurso real na nuvem (ex: uma EC2, um bucket S3)
+  MODULE:     Grupo de recursos reutilizáveis empacotados juntos
+  VARIABLE:   Parâmetro que você passa para personalizar um módulo
+  OUTPUT:     Valor que um módulo retorna (ex: o IP da EC2 criada)
+  STATE:      Arquivo que registra o que o Terraform já criou
+  PLAN:       Prévia de tudo que vai ser criado/alterado/destruído
+  APPLY:      Execução real das mudanças
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+IMPORTANTE — ADAPTAÇÕES PARA O AWS ACADEMY (LEARNER LAB)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+O AWS Academy usa uma role de laboratório chamada "voclabs" que BLOQUEIA
+certas operações IAM por segurança. Por isso, alguns recursos foram adaptados
+ou desabilitados neste projeto para funcionar nesse ambiente.
+
+  RECURSO                  | STATUS NO ACADEMY | MOTIVO DO BLOQUEIO
+  -------------------------|-------------------|-----------------------------
+  VPC Flow Logs            | DESABILITADO      | iam:CreateRole bloqueado
+  AWS Config (recorder)    | DESABILITADO      | iam:CreateRole bloqueado
+  AWS Config (11 regras)   | DESABILITADO      | depende do recorder
+  CloudTrail + CloudWatch  | PARCIAL (só S3)   | iam:CreateRole bloqueado
+  Amazon Inspector v2      | DESABILITADO      | inspector2:Enable bloqueado
+  Módulo IAM (grupos)      | DESABILITADO      | iam:CreateGroup bloqueado
+
+  O que FUNCIONA normalmente no Academy:
+    GuardDuty, Security Hub (CIS + AWS Foundational + integracao GuardDuty),
+    CloudTrail com bucket S3, buckets S3 de log, VPC completa, EC2 + ALB + WAF.
+
+  NOTA: Em uma conta AWS real (fora do Academy), todos esses recursos podem
+  ser habilitados simplesmente alterando os interruptores nos arquivos .tf
+  (mudando 0 para 1 e removendo os blocos comentados).
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PARTE 2 — O QUE ESSE TERRAFORM FAZ?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Este projeto cria uma infraestrutura AWS segura e organizada. Ele é dividido
+em 3 módulos ativos (o módulo IAM está desabilitado no Academy):
+
+────────────────────────────────────────────────────────────────────────────────
+MÓDULO 1 — VPC (Rede Privada Virtual)
+────────────────────────────────────────────────────────────────────────────────
+
+Cria toda a fundação de rede do projeto com range 10.100.0.0/16 em 3 zonas
+de disponibilidade (AZ) na região us-east-1:
+
+  Subnets Públicas (acesso direto à internet):
+    10.100.0.0/23  (AZ1)
+    10.100.10.0/23 (AZ2)
+    10.100.20.0/23 (AZ3)
+
+  Subnets de Produção — PRIVADAS (sem acesso direto à internet):
+    10.100.2.0/23  (AZ1)
+    10.100.12.0/23 (AZ2)
+    10.100.22.0/23 (AZ3)
+
+  Subnets de Banco de Dados — PRIVADAS:
+    10.100.4.0/23  (AZ1)
+    10.100.14.0/23 (AZ2)
+    10.100.24.0/23 (AZ3)
+
+  Subnets de Desenvolvimento — PRIVADAS:
+    10.100.6.0/23  (AZ1)
+    10.100.16.0/23 (AZ2)
+    10.100.26.0/23 (AZ3)
+
+  Subnets de Homologação — PRIVADAS:
+    10.100.8.0/23  (AZ1)
+    10.100.18.0/23 (AZ2)
+    10.100.28.0/23 (AZ3)
+
+  Outros recursos de rede criados:
+    - Internet Gateway (IGW): porta de entrada/saída da internet
+    - NAT Gateway + EIP: permite que recursos privados acessem a internet
+                         sem serem acessíveis de fora
+    - Tabelas de Rotas: definem por onde o tráfego de cada subnet caminha
+    - Network ACLs: firewall no nível de subnet (primeira linha de defesa)
+    - S3 VPC Endpoint: permite acesso ao S3 sem sair da rede AWS (gratuito,
+                       mais rápido e mais seguro)
+
+  [DESABILITADO no Academy] VPC Flow Logs: requer iam:CreateRole (bloqueado
+    pela role voclabs). Em conta real, habilite com create_flow_logs = 1.
+
+────────────────────────────────────────────────────────────────────────────────
+MÓDULO 2 — EC2 + ALB + WAF (Aplicação Web)
+────────────────────────────────────────────────────────────────────────────────
+
+Cria a stack de aplicação web com proteção em camadas:
+
+  Security Groups (firewall de instância):
+    - SG do ALB: aceita HTTP (80) e HTTPS (443) de qualquer IP da internet
+    - SG da EC2: aceita tráfego APENAS vindo do SG do ALB (princípio
+                 do menor privilégio — a EC2 nunca fica exposta diretamente)
+
+  Application Load Balancer (ALB):
+    - Criado nas subnets PÚBLICAS (visível na internet)
+    - Listener na porta 80 (HTTP)
+    - Distribui o tráfego para o Target Group
+
+  Target Group:
+    - Registra a instância EC2 como destino do ALB
+    - Health Check automático na rota "/" — se a EC2 não responder,
+      o ALB para de enviar tráfego para ela
+
+  EC2 Instance:
+    - Tipo: t3.micro (2 vCPU, 1 GB RAM)
+    - AMI: Amazon Linux 2023 (última versão disponível, buscada automaticamente)
+    - Localizada na subnet PRIVADA de produção (jamais exposta à internet)
+    - IMDSv2 obrigatório: versão mais segura do serviço de metadados
+    - Disco EBS gp3 de 20 GB, criptografado em repouso
+
+  AWS WAF v2 (Web Application Firewall):
+    - Associado diretamente ao ALB (intercepta ANTES de chegar na aplicação)
+    - 4 conjuntos de regras gerenciadas pela AWS:
+      * AWSManagedRulesCommonRuleSet: proteção OWASP Top 10 (SQL Injection,
+        XSS, CSRF e outros ataques mais comuns)
+      * AWSManagedRulesKnownBadInputsRuleSet: bloqueia inputs maliciosos
+        conhecidos
+      * AWSManagedRulesAmazonIpReputationList: bloqueia IPs de botnets,
+        scanners e origens maliciosas conhecidas pela Amazon
+      * AWSManagedRulesLinuxRuleSet: bloqueia exploits específicos de
+        sistemas Linux
+
+────────────────────────────────────────────────────────────────────────────────
+MÓDULO 3 — SECURITY (Segurança e Compliance)
+────────────────────────────────────────────────────────────────────────────────
+
+Habilita os principais serviços de segurança disponíveis no AWS Academy:
+
+  Amazon GuardDuty: [ATIVO]
+    - Serviço de detecção de ameaças com Machine Learning
+    - Analisa logs de: VPC Flow Logs, CloudTrail, DNS
+    - Com datasources extras habilitados: logs S3, audit logs Kubernetes,
+      e proteção contra malware em volumes EBS
+    - Gera findings (alertas) quando detecta comportamento suspeito
+
+  Amazon Inspector v2: [DESABILITADO no Academy]
+    - Normalmente faria varredura automática de vulnerabilidades (CVEs)
+    - Bloqueado pela permission inspector2:Enable na role voclabs
+    - Em conta real: habilitar em modules/security/inspector.tf
+
+  AWS Security Hub: [ATIVO]
+    - Painel centralizado de segurança — agrega findings do GuardDuty
+      e outros serviços em um só lugar
+    - Padrões de compliance habilitados:
+      * CIS AWS Foundations Benchmark v1.4.0: controles fundamentais do
+        Center for Internet Security
+      * AWS Foundational Security Best Practices: checklist de melhores
+        práticas da própria AWS
+    - Integração com GuardDuty habilitada
+
+  AWS CloudTrail: [ATIVO — apenas S3, sem CloudWatch Logs]
+    - Registra TODA atividade de API na conta AWS (quem fez o quê e quando)
+    - Trail multi-region: captura eventos de TODAS as regiões
+    - Validação de integridade dos arquivos de log ativada
+    - Logs armazenados em bucket S3 dedicado com:
+      * Criptografia AES256
+      * Versionamento habilitado
+      * Lifecycle: move para S3-IA após 90 dias, Glacier após 365 dias
+      * Bucket policy bloqueando acesso público
+    - [DESABILITADO no Academy] Integração com CloudWatch Logs: requer
+      iam:CreateRole (bloqueado). Em conta real, adicione IAM Role + CW Logs.
+
+  AWS Config: [PARCIAL — apenas bucket S3]
+    - Normalmente gravaria histórico de configurações e verificaria compliance
+    - Recorder, Delivery Channel e 11 regras gerenciadas foram DESABILITADOS
+      pois requerem iam:CreateRole (bloqueado pela voclabs)
+    - O bucket S3 de destino é criado normalmente para uso futuro
+    - Em conta real: habilitar recorder + regras em modules/security/config.tf
+
+────────────────────────────────────────────────────────────────────────────────
+MÓDULO 4 — IAM (Gerenciamento de Identidade e Acesso)
+────────────────────────────────────────────────────────────────────────────────
+
+[DESABILITADO no Academy — iam:CreateGroup bloqueado pela role voclabs]
+
+O módulo IAM existe em modules/iam/ mas está comentado em main.tf.
+Em conta real, descomente o bloco "module iam" em main.tf para criar:
+
+  AulaAdministrador:
+    Política: AdministratorAccess
+    Descrição: Acesso total a todos os serviços e recursos da conta AWS.
+
+  AulasomenteLeitura:
+    Política: ReadOnlyAccess
+    Descrição: Permite visualizar qualquer recurso da AWS, sem poder
+               criar, modificar ou deletar nada. Ideal para auditores.
+
+  AulaFinanceiro:
+    Políticas: AWSBillingReadOnlyAccess + Inline Policy (ce:*)
+    Descrição: Acesso ao console de faturamento e ao Cost Explorer.
+    ATENÇÃO: Requer "IAM User and Role Access to Billing Information" ativado
+             pelo root da conta em: Console AWS > Billing > Account > IAM Access
+
+  AulaEC2devs:
+    Política: AmazonEC2FullAccess
+    Descrição: Controle total sobre instâncias EC2 e recursos de computação.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PARTE 3 — TUTORIAL DE EXECUÇÃO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+────────────────────────────────────────────────────────────────────────────────
+PRÉ-REQUISITOS
+────────────────────────────────────────────────────────────────────────────────
+
+  1. Terraform instalado (versão >= 1.3)
+     Download: https://developer.hashicorp.com/terraform/downloads
+     Verificar: terraform -version
+
+  2. AWS CLI instalado e configurado
+     Download: https://aws.amazon.com/cli/
+
+     No AWS Academy (Learner Lab):
+       - Clique em "AWS Details" no painel do laboratório
+       - Clique em "Show" ao lado de "AWS CLI"
+       - Copie as credenciais (Access Key, Secret Key, Session Token)
+       - Cole no arquivo: C:\Users\<seu-usuario>\.aws\credentials
+         (ou execute: aws configure)
+       → Default region name: us-east-1
+       → Default output format: json
+
+     IMPORTANTE: As credenciais do Academy expiram quando o laboratório
+     encerra. Sempre renove antes de um novo apply.
+
+  3. Verificar autenticação:
+     aws sts get-caller-identity
+     (deve retornar seu Account ID, User ID e ARN da voclabs)
+
+────────────────────────────────────────────────────────────────────────────────
+ESTRUTURA DE ARQUIVOS DO PROJETO
+────────────────────────────────────────────────────────────────────────────────
+
+  Terraform/
+  ├── main.tf                  ← Ponto de entrada: chama todos os módulos
+  ├── data.tf                  ← Busca informações da conta AWS
+  ├── outputs.tf               ← Exibe resultados após o apply
+  ├── topologia-projeto-aula-5.png  ← Diagrama da arquitetura
+  └── modules/
+      ├── vpc/                 ← Módulo de rede (VPC, subnets, etc.)
+      ├── ec2_alb/             ← Módulo de aplicação (EC2 + ALB + WAF)
+      ├── security/            ← Módulo de segurança (GuardDuty, etc.)
+      └── iam/                 ← Módulo de grupos IAM (desabilitado no Academy)
+
+────────────────────────────────────────────────────────────────────────────────
+PASSO A PASSO DE EXECUÇÃO
+────────────────────────────────────────────────────────────────────────────────
+
+Abra o PowerShell (ou terminal de sua preferência) e navegue até a pasta:
+
+  cd "C:\caminho\para\Terraform"
+
+------ PASSO 1: terraform init ------
+
+O que faz: Baixa os plugins necessários (provider AWS) e registra os módulos.
+Deve ser executado uma vez, ou sempre que adicionar novos módulos/providers.
+
+  terraform init
+
+Saída esperada:
+  Initializing modules...
+  Initializing the backend...
+  Initializing provider plugins...
+  - Finding hashicorp/aws versions matching "~> 5.0"...
+  - Installing hashicorp/aws v5.x.x...
+  Terraform has been successfully initialized!
+
+------ PASSO 2: terraform validate ------
+
+O que faz: Verifica se a sintaxe dos arquivos .tf está correta, sem fazer
+           nenhuma chamada à AWS.
+
+  terraform validate
+
+Saída esperada:
+  Success! The configuration is valid.
+
+------ PASSO 3: terraform plan ------
+
+O que faz: Calcula e exibe TUDO que será criado, modificado ou destruído.
+           Nada é alterado na AWS ainda. Leia com atenção!
+
+  terraform plan
+
+O output mostrará linhas com:
+  + resource  → será CRIADO
+  ~ resource  → será MODIFICADO
+  - resource  → será DESTRUÍDO
+
+Ao final, verá algo como:
+  Plan: 85 to add, 0 to change, 0 to destroy.
+
+Dica: Salve o plan em arquivo para garantir que o apply execute exatamente
+      o que foi planejado:
+
+  terraform plan -out=plano.tfplan
+
+------ PASSO 4: terraform apply ------
+
+O que faz: Executa as mudanças na AWS. Pedirá confirmação antes de prosseguir.
+
+  terraform apply
+
+Ou, usando o plano salvo (não pede confirmação):
+  terraform apply plano.tfplan
+
+Quando perguntar:
+  Do you want to perform these actions? Enter a value: yes
+
+ATENÇÃO: Este projeto cria recursos que GERAM CUSTOS na AWS:
+  - NAT Gateway: ~$0.045/hora + tráfego
+  - ALB: ~$0.008/hora + LCUs
+  - EC2 t3.micro: ~$0.0104/hora (Free Tier elegível no primeiro ano)
+  - Buckets S3: custo por armazenamento e requests
+  - GuardDuty, Security Hub: cobram por uso/análise
+
+  No AWS Academy, os créditos do laboratório cobrem esses custos durante
+  a sessão. Lembre-se de executar "terraform destroy" ao final.
+
+Após o apply, os outputs serão exibidos:
+  alb_dns_name         = "projeto-aula-5-ALB-xxxx.us-east-1.elb.amazonaws.com"
+  cloudtrail_s3_bucket = "projeto-aula-5-cloudtrail-123456789"
+  config_s3_bucket     = "projeto-aula-5-aws-config-123456789"
+  ec2_instance_id      = "i-0123456789abcdef0"
+  ec2_private_ip       = "10.100.2.x"
+  guardduty_detector_id = "abc123..."
+  vpc_id               = "vpc-0123456789abcdef0"
+  waf_web_acl_arn      = "arn:aws:wafv2:..."
+
+------ PASSO 5: Verificar o resultado ------
+
+Acesse a aplicação pelo DNS do ALB:
+  http://<valor do alb_dns_name>
+
+Verifique os serviços criados no Console AWS (região us-east-1):
+  - VPC → Your VPCs → procure "projeto-aula-5-VPC"
+  - EC2 → Instances → procure "projeto-aula-5-EC2"
+  - EC2 → Load Balancers → procure "projeto-aula-5-ALB"
+  - WAF → Web ACLs → procure "projeto-aula-5-WAF"
+  - GuardDuty → Detector deve estar ENABLED
+  - Security Hub → Summary → padrões CIS e AWS Foundational ativos
+  - CloudTrail → Trails → "projeto-aula-5-Trail" LOGGING
+  - S3 → Buckets → dois buckets de log (cloudtrail e config)
+
+  [NÃO disponíveis no Academy]:
+  - Config → Dashboard (recorder desabilitado)
+  - IAM → Groups (módulo desabilitado)
+
+────────────────────────────────────────────────────────────────────────────────
+COMANDOS ÚTEIS DO DIA A DIA
+────────────────────────────────────────────────────────────────────────────────
+
+Ver o estado atual (o que o Terraform sabe que existe):
+  terraform show
+
+Listar todos os recursos gerenciados:
+  terraform state list
+
+Ver detalhes de um recurso específico:
+  terraform state show module.vpc.aws_vpc.main
+
+Ver os outputs sem fazer nada:
+  terraform output
+
+Recriar um recurso específico (force replace):
+  terraform apply -replace=module.ec2_alb.aws_instance.main
+
+Ver diferenças sem aplicar:
+  terraform plan
+
+Formatar os arquivos .tf (boa prática):
+  terraform fmt -recursive
+
+────────────────────────────────────────────────────────────────────────────────
+COMO DESTRUIR TUDO (CUIDADO!)
+────────────────────────────────────────────────────────────────────────────────
+
+Para destruir TODA a infraestrutura criada (use ao final do laboratório para
+evitar cobranças):
+
+  terraform destroy
+
+Confirme com: yes
+
+ATENÇÃO: Este comando é IRREVERSÍVEL. Tudo será deletado.
+         Os buckets S3 com force_destroy=false precisarão ser esvaziados
+         manualmente antes do destroy. Para esvaziar:
+
+  aws s3 rm s3://<nome-do-bucket> --recursive
+
+────────────────────────────────────────────────────────────────────────────────
+PROBLEMAS COMUNS E SOLUÇÕES
+────────────────────────────────────────────────────────────────────────────────
+
+ERRO: "No valid credential sources found"
+  SOLUÇÃO: Renove as credenciais do Academy (AWS Details > Show > copiar).
+
+ERRO: "Error: Bucket already exists"
+  CAUSA: Os nomes de buckets S3 são globais. O nome gerado pelo projeto
+         inclui o Account ID para evitar conflitos, mas se já existir:
+  SOLUÇÃO: Execute "terraform import" para importar o bucket existente,
+           ou altere o nome no módulo security.
+
+ERRO: "Error: AccessDenied" com iam:CreateRole ou iam:CreateGroup
+  CAUSA: A role voclabs do Academy não permite criar roles/grupos IAM.
+  SOLUÇÃO: Este projeto já está adaptado para o Academy. Se aparecer esse
+           erro, verifique se não reativou algum recurso comentado no código.
+
+ERRO: "Error: GuardDuty detector already exists"
+  CAUSA: GuardDuty já estava habilitado na conta/região.
+  SOLUÇÃO: Importe o detector existente:
+    terraform import module.security.aws_guardduty_detector.main <detector-id>
+
+ERRO: "Error: Security Hub já está habilitado"
+  CAUSA: Sessão anterior do Academy pode ter deixado Security Hub ativo.
+  SOLUÇÃO: Desabilite manualmente no Console AWS antes do apply, ou importe:
+    terraform import module.security.aws_securityhub_account.main <account-id>
+
+ERRO: "terraform init" falha por falta de internet
+  SOLUÇÃO: Verifique a conexão. O init precisa baixar o provider AWS (~60MB).
+
+ERRO: "The terraform.tfstate file is missing"
+  ATENÇÃO: O state é a memória do Terraform. Se perdido, o Terraform não sabe
+           mais o que criou. Nunca delete o tfstate sem querer.
+  SOLUÇÃO: Se perdido, use "terraform import" para reimportar os recursos,
+           ou destrua manualmente os recursos no Console AWS.
+
+────────────────────────────────────────────────────────────────────────────────
+BOAS PRÁTICAS APRENDIDAS NESTE PROJETO
+────────────────────────────────────────────────────────────────────────────────
+
+  1. USE MÓDULOS: Organize recursos relacionados em módulos reutilizáveis
+  2. NUNCA COMMITE CREDENCIAIS: Use aws configure, nunca coloque keys no .tf
+  3. USE VARIÁVEIS: Evite valores fixos ("hardcoded") nos recursos
+  4. REVISE O PLAN: Sempre leia o plan antes do apply
+  5. VERSIONE O STATE: Em equipes, use backend remoto (S3 + DynamoDB)
+  6. USE TAGS: Todo recurso criado tem tags Project e ImplementedBy
+  7. PRINCÍPIO DO MENOR PRIVILÉGIO: EC2 não exposta, só acessível via ALB
+  8. CRIPTOGRAFIA: EBS criptografado, S3 com AES256, IMDSv2
+  9. AUDITORIA: CloudTrail registra tudo, GuardDuty monitora ameaças
+  10. DEFESA EM PROFUNDIDADE: WAF + SG + NACL + GuardDuty + Security Hub
+  11. ADAPTE AO AMBIENTE: Entenda as limitações do ambiente e ajuste o código
+      (ex: desabilitando recursos bloqueados no Academy com interruptores 0/1)
+
+================================================================================
+  Bons estudos!
+================================================================================
